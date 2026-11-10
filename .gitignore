@@ -2,3 +2,4 @@ build/
 Payload/
 *.ipa
 *.xcodeproj/
+dist/
