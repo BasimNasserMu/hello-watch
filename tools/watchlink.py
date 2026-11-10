@@ -93,20 +93,63 @@ async def zip_conduit_install(watch, ipa_path: Path) -> None:
             log.info("  %s %s%%", prog.get("Status", msg), prog.get("PercentComplete", ""))
 
 
-def make_watch_client_class(phone_udid: str, proxy: CompanionProxyService):
+PHONE_PAIR_DIR = Path.home() / ".hellowatch" / "phone-pairing"
+
+
+async def open_phone_port(phone_udid: str, port: int, host=None, ssl_context=None, strip_ssl=False):
+    """Connect to a port on the iPhone, over USB (usbmux) or over the network (host)."""
+    if host:
+        return await ServiceConnection.create_using_tcp(
+            host, port, create_connection_timeout=5, ssl_context=ssl_context, strip_ssl=strip_ssl
+        )
+    return await ServiceConnection.create_using_usbmux(phone_udid, port, ssl_context=ssl_context, strip_ssl=strip_ssl)
+
+
+def make_watch_client_class(phone_udid: str, proxy: CompanionProxyService, host=None):
     class WatchLockdownClient(LockdownClient):
         async def create_service_connection(self, port, ssl_context=None, strip_ssl=False):
             fwd = await proxy.start_forwarding_service_port(port)
             log.info("forward watch:%s -> iPhone:%s", port, fwd)
-            return await ServiceConnection.create_using_usbmux(
-                phone_udid, fwd, ssl_context=ssl_context, strip_ssl=strip_ssl
-            )
+            return await open_phone_port(phone_udid, fwd, host, ssl_context=ssl_context, strip_ssl=strip_ssl)
 
     return WatchLockdownClient
 
 
-async def connect_watch(autopair: bool, pair_timeout: float):
-    phone = await create_using_usbmux()
+async def connect_phone(host=None):
+    if not host:
+        return await create_using_usbmux()
+    from pymobiledevice3.lockdown import create_using_tcp
+
+    records = sorted(PHONE_PAIR_DIR.glob("*.plist"))
+    if not records:
+        raise SystemExit(f"No iPhone pair record in {PHONE_PAIR_DIR} (save one over USB first).")
+    import plistlib
+
+    udid = records[0].stem
+    log.info("connecting to iPhone %s over network at %s", udid, host)
+    return await create_using_tcp(
+        host,
+        identifier=udid,
+        autopair=False,
+        pair_record=plistlib.loads(records[0].read_bytes()),
+        pairing_records_cache_folder=PHONE_PAIR_DIR,
+        keep_alive=True,  # Wi-Fi lockdown drops service connections without a heartbeat
+    )
+
+
+_heartbeat_task = None
+
+
+async def connect_watch(autopair: bool, pair_timeout: float, host=None):
+    global _heartbeat_task
+    phone = await connect_phone(host)
+    if host:
+        # Over the network the iPhone drops service connections unless the host answers
+        # com.apple.mobile.heartbeat Marco/Polo pings (same as SideStore's minimuxer).
+        from pymobiledevice3.services.heartbeat import HeartbeatService
+
+        _heartbeat_task = asyncio.create_task(HeartbeatService(phone).start())
+        await asyncio.sleep(2)
     proxy = CompanionProxyService(phone)
     watches = await proxy.list()
     if not watches:
@@ -116,10 +159,10 @@ async def connect_watch(autopair: bool, pair_timeout: float):
 
     fwd = await proxy.start_forwarding_service_port(LOCKDOWN_PORT)
     log.info("forward watch:%s -> iPhone:%s", LOCKDOWN_PORT, fwd)
-    service = await ServiceConnection.create_using_usbmux(phone.udid, fwd)
+    service = await open_phone_port(phone.udid, fwd, host)
 
     PAIR_DIR.mkdir(parents=True, exist_ok=True)
-    cls = make_watch_client_class(phone.udid, proxy)
+    cls = make_watch_client_class(phone.udid, proxy, host)
     watch = await cls.create(
         service,
         identifier=watch_udid,
@@ -136,11 +179,12 @@ async def main():
     ap.add_argument("command", choices=["info", "pair", "install", "apps"])
     ap.add_argument("ipa", nargs="?")
     ap.add_argument("--timeout", type=float, default=120)
+    ap.add_argument("--host", help="reach the iPhone over the network at this IP instead of USB")
     ap.add_argument("-v", action="store_true")
     a = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if a.v else logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    watch = await connect_watch(autopair=a.command != "info", pair_timeout=a.timeout)
+    watch = await connect_watch(autopair=a.command != "info", pair_timeout=a.timeout, host=a.host)
     print("paired:", watch.paired)
     vals = watch.all_values
     for k in ["DeviceName", "ProductType", "ProductVersion", "BuildVersion", "UniqueDeviceID"]:
