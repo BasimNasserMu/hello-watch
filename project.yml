@@ -18,7 +18,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: HelloWatch
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.basimnassermu.hellowatch.TD62XKTTHQ
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.basimnassermu.hellowatch
         INFOPLIST_KEY_CFBundleDisplayName: HelloWatch
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         TARGETED_DEVICE_FAMILY: "1"
@@ -29,8 +29,8 @@ targets:
     settings:
       base:
         PRODUCT_NAME: HelloWatchApp
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.basimnassermu.hellowatch.TD62XKTTHQ.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.basimnassermu.hellowatch.watchkitapp
         INFOPLIST_KEY_CFBundleDisplayName: HelloWatch
         INFOPLIST_KEY_WKApplication: YES
-        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: io.github.basimnassermu.hellowatch.TD62XKTTHQ
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: io.github.basimnassermu.hellowatch
         TARGETED_DEVICE_FAMILY: "4"
