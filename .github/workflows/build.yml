@@ -1,0 +1,45 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build iPhone app (unsigned)
+        run: |
+          xcodebuild -project HelloWatch.xcodeproj -target HelloPhone \
+            -sdk iphoneos -configuration Release \
+            SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO build
+
+      - name: Build watch app (unsigned)
+        run: |
+          xcodebuild -project HelloWatch.xcodeproj -target HelloWatchApp \
+            -sdk watchos -configuration Release \
+            SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO build
+
+      - name: Package IPA (watch app embedded in Watch/)
+        run: |
+          mkdir -p Payload
+          cp -R build/Release-iphoneos/HelloWatch.app Payload/
+          mkdir -p Payload/HelloWatch.app/Watch
+          cp -R build/Release-watchos/HelloWatchApp.app Payload/HelloWatch.app/Watch/
+          echo "--- IPA contents ---"
+          find Payload -maxdepth 3
+          zip -qr HelloWatch.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HelloWatch-ipa
+          path: HelloWatch.ipa
