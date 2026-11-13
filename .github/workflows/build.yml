@@ -39,7 +39,15 @@ jobs:
           find Payload -maxdepth 3
           zip -qr HelloWatch.ipa Payload
 
+      - name: Package watch-only IPA (for installing straight onto the watch)
+        run: |
+          mkdir -p WatchOnly/Payload
+          cp -R build/Release-watchos/HelloWatchApp.app WatchOnly/Payload/
+          (cd WatchOnly && zip -qr ../HelloWatchApp-watch.ipa Payload)
+
       - uses: actions/upload-artifact@v4
         with:
           name: HelloWatch-ipa
-          path: HelloWatch.ipa
+          path: |
+            HelloWatch.ipa
+            HelloWatchApp-watch.ipa

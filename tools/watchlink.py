@@ -43,14 +43,33 @@ def _zip_local_header(name: str, size: int = 0, crc: int = 0) -> bytes:
     ) + n + _ZIP_EXTRA
 
 
+def _watch_entries(ipa) -> list:
+    """(entry, name-to-send) pairs for the watch app.
+
+    A combined iPhone IPA has Payload/<Phone>.app/Watch/<Watch>.app; the watch rejects the outer
+    iPhone app (DeviceFamilyNotSupported), so lift the embedded watch app up to Payload/<Watch>.app.
+    A watch-only IPA is sent unchanged.
+    """
+    import re
+
+    entries = ipa.infolist()
+    pat = re.compile(r"^Payload/[^/]+\.app/Watch/([^/]+\.app/.*)$")
+    nested = [(e, "Payload/" + m.group(1)) for e in entries if (m := pat.match(e.filename))]
+    if nested:
+        apps = {n.split("/")[1] for _, n in nested}
+        log.info("combined IPA: installing embedded watch app %s", ", ".join(sorted(apps)))
+        return [(ipa.getinfo("Payload/"), "Payload/")] + nested if "Payload/" in ipa.namelist() else nested
+    return [(e, e.filename) for e in entries]
+
+
 async def zip_conduit_install(watch, ipa_path: Path) -> None:
     import plistlib
     import zipfile
     import zlib
 
     with zipfile.ZipFile(ipa_path) as ipa:
-        entries = ipa.infolist()
-        total = sum(e.file_size for e in entries)
+        entries = _watch_entries(ipa)
+        total = sum(e.file_size for e, _ in entries)
         conn = await watch.start_lockdown_service("com.apple.streaming_zip_conduit")
         await conn.send_plist({
             "InstallTransferredDirectory": 1,
@@ -73,12 +92,12 @@ async def zip_conduit_install(watch, ipa_path: Path) -> None:
         })
         await conn.sendall(_zip_local_header("META-INF/"))
         await conn.sendall(_zip_local_header("META-INF/com.apple.ZipMetadata.plist", len(meta), zlib.crc32(meta)) + meta)
-        for e in entries:
+        for e, name in entries:
             if e.is_dir():
-                await conn.sendall(_zip_local_header(e.filename))
+                await conn.sendall(_zip_local_header(name))
             else:
                 data = ipa.read(e)
-                await conn.sendall(_zip_local_header(e.filename, len(data), e.CRC) + data)
+                await conn.sendall(_zip_local_header(name, len(data), e.CRC) + data)
         await conn.sendall(_CENTRAL_DIR_SIG)
         log.info("streamed %d entries (%d bytes), waiting for install…", len(entries), total)
 
